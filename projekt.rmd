@@ -1,0 +1,1788 @@
+---
+title: "Projekt"
+author: "Krzysztof Zaczyk Łukasz Klimczak"
+Gruop: 
+output: 
+    html_document:
+      theme: spacelab
+      highlight: kate
+      toc: true
+      toc_float: true
+      collapsed: true
+      smooth_scroll: true
+      number_sections: false
+      toc_depth: 3
+      self_contained: true
+      code_folding: hide
+link-citations: yes
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r bibilioteki, include=FALSE,message=FALSE, warning=FALSE}
+library(tidyr)
+library(stringr)
+library(leaflet)
+library(grDevices)
+library(utils)
+library(datasets)
+library(methods)
+library(base)
+library(parallel)
+library(future)
+library(devtools)
+library(gridExtra)
+library(fpp2)
+library(data.table)
+library(openair)
+library(worldmet)
+library(tibble)
+library(giosimport)
+library(tidyverse)
+library(boot)
+library(Rmisc)
+library(GGally)
+library(tsibble)
+library(lubridate)
+library(ggplot2)
+library(feasts)
+library(gridExtra)
+library(grid)
+library(forecast)
+library(dplyr)
+library(reshape)
+library(fabletools)
+library(feasts)
+library(fable)
+library(fpp3)
+library(future.apply)
+library(tsibbledata)
+library(lattice)
+```
+
+
+
+***
+##  1. Przedstawienie danych
+***
+
+Dane o jakosci powietrza pobrane zostaly za pomoca pakietu giosimport. 
+
+```{r dane, echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+setwd("C:/Users/Admin/Desktop/pds/projekt")
+kat_dost <- "C:/Users/Admin/Desktop/pds/projekt" 
+
+meta <- gios_metadane(type = "meta", 
+                      download = F,    # zmień na T, jeśli uruchamiasz piewszy raz
+                      path = kat_dost, 
+                      mode = "wb")
+
+stanowiska <- gios_metadane(type = "stand", 
+                            download = F,  
+                            path = kat_dost, 
+                            mode = "wb")
+
+#aktywne stacje jakości powietrza zachodniopomorskie
+filtr1 <- meta %>%
+  filter(status == "aktywny")%>%
+  filter(wojewodztwo == "ZACHODNIOPOMORSKIE")
+
+gios_vis(data = filtr1) # mapka
+
+
+```
+Rys. 1. Graficzne przedstawie lokalizacji aktywnych stacji jakości powietrza zlokalizowane w województwie zachodniopomorskim. 
+
+
+***
+
+
+
+```{r staty, echo=TRUE}
+
+tabelka1=filtr1[,-c(1,3,5,7,8,12,13,14,15,16)] #tabelka
+DT::datatable(tabelka1)
+
+
+```
+
+Tab. 1. Aktywne stacje monitoringu jakości powietrza w województwie zachodniopomorskim.
+
+
+
+
+***
+## 2. Pozyskanie danych
+***
+
+### 2.1. Metadane pomiary automatyczne
+***
+
+```{r , echo= TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+filtr2 <- stanowiska %>%
+  filter(status.stanowiska == "aktywny")%>%
+  filter(wojewodztwo == "ZACHODNIOPOMORSKIE")%>%
+  filter(typ.pomiaru == "automatyczny")%>%
+  filter(wskaznik == "pył zawieszony PM10"| wskaznik == "pył zawieszony PM2.5")
+tabelka2=filtr2[,-c(1,2,3,6,8,9,10,12,14,15)]#tabelka
+DT::datatable(tabelka2)
+
+
+```
+
+Tab.2. Lista stacji na których były wykonywane pomiary automatyczne stężeń PM10 i PM2.5 w 2018 r.
+
+***
+
+
+```{r , echo= TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+filtr2 <- stanowiska %>%
+  filter(status.stanowiska == "aktywny")%>%
+  filter(wojewodztwo == "ZACHODNIOPOMORSKIE")%>%
+  filter(typ.pomiaru == "automatyczny")%>%
+  filter(wskaznik == "pył zawieszony PM10"| wskaznik == "pył zawieszony PM2.5")%>%
+  pull(kod.stacji)
+gios_vis(data = meta %>% 
+           filter(kod.stacji %in% filtr2)) 
+```
+
+Rys. 2. Graficzne przedstawie lokalizacji aktywnych stacji jakości powietrza na których były wykonywane pomiary automatyczne stężeń PM10 i PM2.5 w województwie zachodniopomorskim. 
+
+
+
+***
+### 2.2. Metadane pomiary manualne
+***
+
+
+```{r , echo=TRUE}
+filtr3 <- stanowiska %>%
+  filter(status.stanowiska == "aktywny")%>%
+  filter(wojewodztwo == "ZACHODNIOPOMORSKIE")%>%
+  filter(typ.pomiaru == "manualny")%>%
+  filter(wskaznik == "pył zawieszony PM10"| wskaznik == "pył zawieszony PM2.5")
+tabelka3=filtr3[,-c(1,2,3,6,8,9,10,12,14,15)] #tabelka
+DT::datatable(tabelka3)
+
+
+```
+
+Tab. 3. Lista stacji na których były wykonywane pomiary automatyczne stężeń PM10 i PM2.5 w roku 2018
+
+
+***
+
+
+```{r , echo= TRUE}
+filtr3 <- stanowiska %>%
+  filter(status.stanowiska == "aktywny")%>%
+  filter(wojewodztwo == "ZACHODNIOPOMORSKIE")%>%
+  filter(typ.pomiaru == "manualny")%>%
+  filter(wskaznik == "pył zawieszony PM10"| wskaznik == "pył zawieszony PM2.5")%>%
+  pull(kod.stacji)
+gios_vis(data = meta %>% 
+           filter(kod.stacji %in% filtr3)) 
+
+```
+
+
+Rys. 3. Graficzne przedstawie lokalizacji aktywnych stacji jakości powietrza na których były wykonywane pomiary manualne stężeń PM10 i PM2.5 w województwie zachodniopomorskim. 
+
+
+
+***
+##  3. Pobranie danych
+***
+
+Korzystając z pakietu giosimport pobraliśmy dane jakości powietrza dla lat 2008-2017. Pobrane dane złączyliśmy i zapisaliśmy do pliku .RData. Następnie wyselekcjonowaliśmy dane dla województwa zachodniopomorskiego.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+load(file = "C:/Users/Admin/Desktop/pds/projekt/pm1h_raw.RData") 
+pm1h <- pm1h_raw
+rm(pm1h_raw)
+
+pm <- unique(pm1h$kod)
+pm[str_detect(pm, "^Zp")] -> kody_zp
+
+pm1h <- filter(pm1h, kod == kody_zp)
+
+pm1h <- gios_kody(data = pm1h, meta = meta)
+
+pm1h %>% 
+  filter(sub == "PM10" | sub == "PM2.5") %>% 
+  mutate(rok = year(date), miesiac = month(date), godzina = hour(date)) -> pm1h
+
+load(file = "C:/Users/Admin/Desktop/pds/projekt/pm24h_raw.RData")
+pm24h <- pm24h_raw
+rm(pm24h_raw)
+
+pm <- unique(pm24h$kod)
+pm[str_detect(pm, "^Zp")] -> kody_zp
+
+pm24h <- filter(pm24h, kod == kody_zp)
+
+pm24h <- gios_kody(data = pm24h, meta = meta)
+
+pm24h %>% 
+  filter(sub == "PM10" | sub == "PM2.5") %>% 
+  mutate(rok = year(date), miesiac = month(date), godzina = hour(date)) -> pm24h
+
+
+
+```
+
+
+***
+## 4. Przedziały ufności
+***
+
+***
+### 4.1. RMISC: przedziały ufności na poziomie ufności 95% średnich średniorocznych
+***
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+Rmisc::summarySE(data = pm1h,
+                 measurevar = "obs",
+                 groupvars = c("sub","kod"),
+                 na.rm = T) %>%
+  mutate_if(is.numeric, round, 2) -> wynik_1h
+
+Rmisc::summarySE(data = pm24h,
+                 measurevar = "obs",
+                 groupvars = c("sub","kod"),
+                 na.rm = T) %>%
+  mutate_if(is.numeric,round,2) -> wynik_24h
+
+rbind(data.frame(wynik_1h, czas_mu = "1g"),
+      data.frame(wynik_24h, czas_mu = "24g")) -> wynik_RMISC 
+
+position_d <- position_dodge(0.4)
+
+
+knitr::kable(wynik_1h, digits = 2)
+knitr::kable(wynik_24h, digits = 2)
+
+```
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+ggplot(wynik_RMISC %>%
+         filter(sub == "PM10") %>%
+         mutate(kod = str_sub(kod,3,30)),
+       aes(x = kod,
+           y = obs,
+           colour = factor(czas_mu),
+           group = factor(czas_mu),
+           fill = factor(czas_mu)))+
+geom_errorbar(aes(ymin = obs-ci,
+                  ymax = obs+ci),
+              width = .2,
+              position = position_d)+
+  geom_point(position = position_d,
+             size = 1,
+             shape = 21)+
+  labs(x = "kod stacji",
+       y = openair::quickText("Stężenie PM10 [ug/m3]"),
+       title = "Zestawienie stężeń średniorocznych pyłów zawieszonych PM10",
+       color = "czas_mu", fill = "czas_mu")+
+  theme_bw()+
+  theme(legend.justification = c(0.95,0.95),
+        legend.position = c(0.95,0.95),
+        axis.text.x = element_text(angle = 45, vjust = 0.4))
+
+```
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+ggplot(wynik_RMISC %>%
+         filter(sub == "PM2.5") %>%
+         mutate(kod = str_sub(kod,3,30)),
+       aes(x = kod,
+           y = obs,
+           colour = factor(czas_mu),
+           group = factor(czas_mu),
+           fill = factor(czas_mu)))+
+geom_errorbar(aes(ymin = obs-ci,
+                  ymax = obs+ci),
+              width = .2,
+              position = position_d)+
+  geom_point(position = position_d,
+             size = 1,
+             shape = 21)+
+  labs(x = "kod stacji",
+       y = openair::quickText("Stężenie PM2.5 [ug/m3]"),
+       title = "Zestawienie stężeń średniorocznych pyłów zawieszonych PM2.5",
+       color = "czas_mu", fill = "czas_mu")+
+  theme_bw()+
+  theme(legend.justification = c(0.95,0.95),
+        legend.position = c(0.95,0.95),
+        axis.text.x = element_text(angle = 0, vjust = 0.4))
+```
+
+
+
+***
+### 4.2.  Bootstrap przedziały ufności na poziomie ufności 95% średnich średniorocznych
+***
+
+Definiowanie funkcji pomocniczych.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+fun_mean <- function(d, i) {
+  return(mean(d[i]))
+}
+
+fun_ci <- function(x, R = 1000, conf = 0.95) {
+  
+  # szacujemy rozkład empiryczny statystyki
+  my.boot <- boot(data = x, 
+                  statistic = fun_mean,
+                  R = R)
+  
+  # wyznaczamy przedział ufności
+  ci <- boot.ci(boot.out = my.boot, 
+                conf = conf, 
+                type = "basic")$basic[4:5]
+  # zapisujemy interesujące nas wyniki do wektora
+  
+  ci <- data.frame(orginal = my.boot$t0, 
+                   lower = ci[1], 
+                   upper = ci[2])
+  return(ci)
+}
+
+pm1h %>%
+  na.omit() %>% 
+  group_by(kod, sub) %>% 
+  do(ci = fun_ci(x = .$obs, R = 1000, conf = 0.95)) -> ci_pm1
+
+pm24h %>%
+  na.omit() %>% 
+  group_by(kod, sub) %>% 
+  do(ci = fun_ci(x = .$obs, R = 1000, conf = 0.95)) -> ci_pm24
+
+rbind(data.frame(ci_pm1  %>% unnest(cols = ci), czas_mu = "1g"),
+      data.frame(ci_pm24 %>% unnest(cols = ci), czas_mu = "24g")) -> wyn_boot
+
+
+```
+
+***
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+pd <- position_dodge(width = 0.8)
+
+ggplot(wyn_boot %>% 
+         filter(sub == "PM10") %>% 
+         mutate(kod = str_sub(kod, 1, 30)), 
+       aes(x = kod, 
+           y = orginal,
+           colour = factor(czas_mu),
+           group = factor(czas_mu),
+           fill = factor(czas_mu))) +
+  geom_errorbar(aes(ymin = lower, 
+                    ymax = upper, 
+                    colour = czas_mu), 
+                width = .6, position = pd) +
+  geom_point(size = 2,
+             shape = 21,
+             position = pd) +
+  labs(x = "Kod Stacji", 
+       y = openair::quickText("Stężenie PM10 [ug/m3]"),
+       color = "Czas uśredniania", fill = "Czas uśredniania") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1)) + 
+  ggtitle("Zestawienie stężeń średniorocznych pyłów zawieszonych PM10")
+
+
+```
+
+***
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+ggplot(wyn_boot %>% 
+         filter(sub == "PM2.5") %>% 
+         mutate(kod = str_sub(kod, 1, 30)), 
+       aes(x = kod, 
+           y = orginal,
+           colour = factor(czas_mu),
+           group = factor(czas_mu),
+           fill = factor(czas_mu))) +
+  geom_errorbar(aes(ymin = lower, 
+                    ymax = upper, 
+                    colour = czas_mu), 
+                width = .6, position = pd) +
+  geom_point(size = 2,
+             shape = 21,
+             position = pd) +
+  labs(x = "Kod Stacji", 
+       y = openair::quickText("Stężenie PM2,5 [ug/m3]"),
+       color = "Czas uśredniania", fill = "Czas uśredniania") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1)) + 
+  ggtitle("Zestawienie stężeń średniorocznych pyłów zawieszonych PM2.5")
+
+
+```
+
+***
+### 4.4. Porównanie przedziałów ufności na poziomie ufności 95%
+***
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+wynik_RMISC %>%mutate(lower = obs - ci,
+               upper = obs + ci,
+               type = "rmisc") -> wynik_RMISC_mutate
+
+wynik_RMISC_mutate <- rename(wynik_RMISC_mutate, c("obs" = "orginal"))
+
+rbind(wyn_boot %>%
+        mutate(type = "boot"),
+      wynik_RMISC_mutate %>%
+        select(kod, sub, orginal, lower, upper, czas_mu, type)
+      ) -> wynik_bind_uf
+position_d <- position_dodge(0.4)
+
+ggplot(wynik_bind_uf %>%
+         filter(sub == "PM10",czas_mu == "1g") %>%
+         mutate(kod = str_sub(kod, 3,30)),
+       aes(x = kod,
+           y = orginal,
+           colour = factor(type),
+           group = factor(type),
+           fill = factor(type)))+
+  geom_errorbar(aes(ymin = lower,
+                    ymax = upper),
+                width = .2,
+                position = position_d)+
+  geom_point(position = position_d,
+             size = 1,
+             shape = 21)+
+  labs(x = "Kod stacji",
+       y = openair::quickText("Stężenie PM10[ug/m3]"),
+       color = "type", fill = "type")+
+  theme_bw()+
+  theme(legend.justification = c(0.95, 0.95),
+        legend.position = c(0.95, 0.95),
+        axis.text.x = element_text(angle = 45, vjust = 0.4))+
+        ggtitle("Wartości średnioroczne stężeń PM10 - stacje automatyczne")
+
+
+```
+
+
+***
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+ggplot(wynik_bind_uf %>%
+         filter(sub == "PM2.5",czas_mu == "1g") %>%
+         mutate(kod = str_sub(kod, 3,30)),
+       aes(x = kod,
+           y = orginal,
+           colour = factor(type),
+           group = factor(type),
+           fill = factor(type)))+
+  geom_errorbar(aes(ymin = lower,
+                    ymax = upper),
+                width = .2,
+                position = position_d)+
+  geom_point(position = position_d,
+             size = 1,
+             shape = 21)+
+  labs(x = "Kod stacji",
+       y = openair::quickText("Stężenie PM2.5[ug/m3]"),
+       color = "type", fill = "type")+
+  theme_bw()+
+  theme(legend.justification = c(0.95, 0.95),
+        legend.position = c(0.95, 0.95),
+        axis.text.x = element_text(angle = 0, vjust = 0.4))+
+        ggtitle("Wartości średnioroczne stężeń PM2.5 - stacje automatyczne ")
+
+```
+
+***
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+position_d <- position_dodge(0.4)
+
+ggplot(wynik_bind_uf %>%
+         filter(sub == "PM10",czas_mu == "24g") %>%
+         mutate(kod = str_sub(kod, 3,30)),
+       aes(x = kod,
+           y = orginal,
+           colour = factor(type),
+           group = factor(type),
+           fill = factor(type)))+
+  geom_errorbar(aes(ymin = lower,
+                    ymax = upper),
+                width = .2,
+                position = position_d)+
+  geom_point(position = position_d,
+             size = 1,
+             shape = 21)+
+  labs(x = "Kod stacji",
+       y = openair::quickText("Stężenie PM10[ug/m3]"),
+       color = "type", fill = "type")+
+  theme_bw()+
+  theme(legend.justification = c(0.95, 0.95),
+        legend.position = c(0.95, 0.95),
+        axis.text.x = element_text(angle = 45, vjust = 0.4))+
+        ggtitle("Wartości średnioroczne stężeń PM10 - stacje manualne")
+
+```
+
+***
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+ggplot(wynik_bind_uf %>%
+         filter(sub == "PM2.5",czas_mu == "24g") %>%
+         mutate(kod = str_sub(kod, 3,30)),
+       aes(x = kod,
+           y = orginal,
+           colour = factor(type),
+           group = factor(type),
+           fill = factor(type)))+
+  geom_errorbar(aes(ymin = lower,
+                    ymax = upper),
+                width = .2,
+                position = position_d)+
+  geom_point(position = position_d,
+             size = 1,
+             shape = 21)+
+  labs(x = "Kod stacji",
+       y = openair::quickText("Stężenie PM2.5[ug/m3]"),
+       color = "type", fill = "type")+
+  theme_bw()+
+  theme(legend.justification = c(0.95, 0.95),
+        legend.position = c(0.95, 0.95),
+        axis.text.x = element_text(angle = 0, vjust = 0.4))+
+        ggtitle("Wartości średnioroczne stężeń PM2.5- stacje manualne")
+
+
+```
+
+
+
+## 5. Korelacja danych
+
+Korelacja pomiedzy PM10 i PM2.5 wraz z przedzialem ufnosci na poziomie 95%.
+
+ 
+Deklaracja funkcji:
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE}
+
+fun_r <- function(d, i, x, y, metoda) {
+  d2 <- d[i,]
+  cor(d2[,x], d2[,y], method = metoda)
+}
+
+
+fun_ci_r <- function(data, x, y, R = 500, conf = 0.95, metoda_corr = "pearson") {
+  
+  my.boot <- boot(data = data, 
+                  statistic = fun_r,
+                  R = R,
+                  x = x,
+                  y = y,
+                  metoda = metoda_corr)
+  ci <- boot.ci(boot.out = my.boot, 
+                conf = conf, 
+                type = "basic")$basic[4:5]
+  ci <- data.frame(orginal = my.boot$t0, 
+                   lower = ci[1], 
+                   upper = ci[2])
+  return(ci)
+}
+```
+
+
+### 5.1. Wykres dla stacji:
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE}
+
+pm1h_corr <- pm1h %>% 
+  spread(key = sub, value = obs) %>% 
+  na.omit() %>% 
+  group_by(kod) %>% 
+  nest()
+
+pm1h_corr <- pm1h_corr %>% 
+  mutate(kor = map(.x = data,
+                   .f = fun_ci_r,
+                   x = "PM10",
+                   y = "PM2.5"))
+
+pm1h_corr <- pm1h_corr %>% 
+  unnest(cols = kor)
+
+```
+
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE}
+
+names(pm1h_corr)[names(pm1h_corr) == "PM2.5"] <- "R"
+
+ggplot(pm1h_corr, aes(x = kod, y = R)) +
+  geom_errorbar(aes(ymin = lower,
+                    ymax = upper),
+                width = .2) +
+  geom_point(size = 2.5,
+             shape = 21,
+             fill = "black") +
+  geom_line(group = 1, color = "grey") +
+  labs(x = "Kod stacji",
+       y = openair::quickText("Współczynnik Korelacji Pearsona"))
+
+```
+
+W przypadku województwa Zachodnio Pomorskiego korelacje mozemy policzyc wylacznie dla 1 stacji znajdujacej sie w Szczecinie. Z wykresy mozna odczytac, ze korelacja jest bardzo wysoka i wynosi 0.925.
+
+### 5.2. Wykres dla poszczególnych miesiecy:
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE}
+
+pm1h_corr <- pm1h %>% 
+  spread(key = sub, value = obs) %>% 
+  na.omit() %>% 
+  group_by(miesiac, kod) %>% 
+  nest()
+
+pm1h_corr <- pm1h_corr %>% 
+  mutate(kor = map(.x = data,
+                   .f = fun_ci_r,
+                   x = "PM10",
+                   y = "PM2.5"))
+
+pm1h_corr <- pm1h_corr %>% 
+  unnest(cols = kor)
+
+```
+
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE}
+
+names(pm1h_corr)[names(pm1h_corr) == "PM2.5"] <- "R"
+
+ggplot(pm1h_corr, aes(x = factor(miesiac), y = R)) +
+  geom_errorbar(aes(ymin = lower,
+                    ymax = upper),
+                width = .2) +
+  geom_point(size = 2.5,
+             shape = 21,
+             fill = "black") +
+  geom_line(group = 1, color = "grey") +
+  labs(x = "Miesiąc",
+       y = openair::quickText("Współczynnik Korelacji Pearsona ze względu na miesiąc")) +
+  facet_wrap(~pm1h_corr$kod)
+
+```
+
+Z wykresu mozna odczytac, ze korelacj pomiedzy pylem PM10 i PM2.5 w okresie zimowym jest wyzsza niz w pozostalych. W sierpniu korelacja spada nawet ponizej 0.5.
+
+### 5.3. Wykres dla godzin:
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE}
+pm1h_corr <- pm1h %>% 
+  spread(key = sub, value = obs) %>% 
+  na.omit() %>% 
+  group_by(godzina, kod) %>% 
+  nest()
+
+pm1h_corr <- pm1h_corr %>% 
+  mutate(kor = map(.x = data,
+                   .f = fun_ci_r,
+                   x = "PM10",
+                   y = "PM2.5"))
+
+pm1h_corr <- pm1h_corr %>% 
+  unnest(cols = kor)
+
+```
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE}
+names(pm1h_corr)[names(pm1h_corr) == "PM2.5"] <- "R"
+
+ggplot(pm1h_corr, aes(x = factor(godzina), y = R)) +
+  geom_errorbar(aes(ymin = lower,
+                    ymax = upper),
+                width = .2) +
+  geom_point(size = 2.5,
+             shape = 21,
+             fill = "black") +
+  geom_line(group = 1, color = "grey") +
+  labs(x = "Godzina",
+       y = openair::quickText("Współczynnik Korelacji Pearsona ze względu na godzinę")) +
+  facet_wrap(~pm1h_corr$kod)
+
+```
+
+Widzimy, ze dla godziny 11 korelacja jest nizsza niz dla pozostalych godzin oznaczonych na wykresi. Mimo to utrzymuje sie na wyskokim poziomie
+
+## 6. Pobieranie danych do części 2 projektu.
+
+### 6.1. Wczytanie danych o jakości powietrza.
+
+Dane o jakości powietrza wczytaliśmy dla stacji Koszalin_ArmiiKrajowej.
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE}
+kat_dost <- "C:/Users/Admin/Desktop/pds/projekt" 
+
+inp_pm10_1<- map(.x=pliki_all,
+                 .f=~.[str_detect(.,pattern="PM10_1g")])%>%
+  flatten_chr()
+
+PM10<- map_df(.x=inp_pm10_1,
+              .f=gios_read,
+              czas_mu="1g",
+              path=kat_dost)#78911
+
+#"ZpSzczecinLukasza" "ZpSzczAndr01"      "ZpSzczPils02"      "ZpSzczLacz04"      "ZpKoszArKraj"      "ZpGryfGryfinoDO"  
+#"ZpGryfMarwiceDO"   "ZpGryfStokiDO"     "ZpStarLipnikDO"    "ZpSzczecinDO"      "ZpSzczecPrze"     
+koszalin <- PM10 %>%
+  filter(kod=="ZpKoszArKraj")
+
+
+```
+
+### 6.2. Wczytanie danych meteorologicznych.
+
+Dane meteorologiczne wczytaliśmy dla stacji "KOSZALIN", była ona najbliżej powyższej stacji jakości powietrza. 
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE}
+meteo <- importNOAA(code="121050-99999", year = 2013:2019)
+meteo$date <- meteo$date+3600
+
+```
+
+### 6.3. Łączenie danych
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE}
+koszalin <- left_join(koszalin,meteo, by="date")
+koszalin <- koszalin%>% 
+  select(station, date, obs, ws, visibility, air_temp, atmos_pres, dew_point, RH)
+
+```
+
+### 6.4. Uśrednianie danych
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE}
+koszalin_m <- koszalin %>% timeAverage(avg.time="month")
+koszalin_d <- koszalin %>% timeAverage(avg.time="day")
+
+```
+
+### 6.4. Konwersja na obiekt tstible.
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE}
+koszalin_h <- koszalin %>% 
+  as_tsibble(index = date)
+
+koszalin_d <- koszalin_d %>% 
+  mutate(date = ymd(date)) %>% 
+  as_tsibble(index = date)
+
+koszalin_m <- koszalin_m %>% 
+  mutate(date = yearmonth(date)) %>% 
+  as_tsibble(index = date)
+
+koszalin_h <- koszalin_h %>% tsibble::fill_gaps(.full=TRUE)
+
+```
+
+## 7. Podgląd szeregów czasowych.
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE}
+ggplot(data = koszalin, aes(x = date, y = obs)) +
+  geom_line() +
+  ggtitle("Wykres szeregu czasowego danych dla stacji Koszalin")
+
+ggplot(data = koszalin %>% 
+         timeAverage(avg.time = "day"), 
+       aes(x = date, y = obs)) +
+  geom_line()+
+  ggtitle("Średnie dniowe")
+
+
+ggplot(data = koszalin %>% 
+         timeAverage(avg.time = "week"), 
+       aes(x = date, y = obs)) +
+  geom_line()+
+  ggtitle("Średnie tygodniowe")
+
+
+ggplot(data = koszalin %>% 
+         timeAverage(avg.time = "month"), 
+       aes(x = date, y = obs)) +
+  geom_line()+
+  ggtitle("Średnie miesieczne")
+
+koszalin_m %>% gg_season(obs)+
+  ggtitle("Wykres sezonowy")
+
+
+```
+
+Na powyższych wykresach widac sezonowosc i trend naszych danych.
+
+
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE}
+koszalin_m %>% 
+  gather(key = "parametr", value = "obserwacje") %>% 
+  gg_season()+
+  ggtitle("Wykres podserii dla wszystkich parametrów")
+
+koszalin_m %>% gg_subseries(obs)
+
+
+```
+
+Na powyższym wykresie widac, ze na przestrzeni 4 lat nie widac znaczacych trendow w naszych predyktorach.
+
+
+<b> Wykresy rozrzutu.</b>
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE}
+koszalin_m %>% 
+  ggplot(aes(x = obs, y = ws)) +
+  geom_point() +
+  theme_bw()+
+  ggtitle("Wykres rozrzutu miedzy predkoscia wiatru a PM10")
+
+koszalin_m %>% 
+  ggplot(aes(x = obs, y = visibility)) +
+  geom_point() +
+  theme_bw()+
+  ggtitle("Wykres rozrzutu miedzy widocznoscia a PM10")
+
+koszalin_m %>% 
+  ggplot(aes(x = obs, y = air_temp)) +
+  geom_point() +
+  theme_bw()+
+  ggtitle("Wykres rozrzutu miedzy temperatura powietrza a PM10")
+
+koszalin_m %>% 
+  ggplot(aes(x = obs, y = atmos_pres)) +
+  geom_point() +
+  theme_bw()+
+  ggtitle("Wykres rozrzutu miedzy cisnieniem atmosferycznym a PM10")
+
+koszalin_m %>% 
+  ggplot(aes(x = obs, y = dew_point)) +
+  geom_point() +
+  theme_bw()+
+  ggtitle("Wykres rozrzutu miedzy punktem rosy a PM10")
+
+koszalin_m %>% 
+  ggplot(aes(x = obs, y = RH)) +
+  geom_point() +
+  theme_bw()+
+  ggtitle("Wykres rozrzutu miedzy wilgotnoscia wzgledna a PM10")
+
+
+```
+
+Analizujac wykresy rozrzutu widac duze rozproszenie pomiedzy danymi, wiec na razie ciezko jest stwierdzic korelacje miedzy danymi.
+
+
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE}
+koszalin_m %>% 
+  gather(key = "parametr", value = "obserwacje") %>% 
+  ggplot(aes(x = date, y = obserwacje)) +
+  geom_line() +
+  facet_wrap(~parametr, scales = "free_y", ncol = 1)+
+  ggtitle("Wykres serii czasowej dla wszystkich parametrow")
+
+```
+
+Widac, ze temperatura powietrza i punkt rosy sa prawie identyczne. 
+
+
+
+## 8. Analiza wizualna danych
+
+### 8.1. Analiza podstawowa.
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE}
+koszalin_m %>% 
+  GGally::ggpairs(columns = 2:ncol(.))
+
+```
+
+Dla PM10 najlepsza korelacja jest miedzy temperatura powietrza, punktem rosy i widocznoscia. 
+Wysoka korelacja pomiedzy predyktorami: punktem rosy i temperatura powietrza, widocznosc i wilgotnosc wzgledna, temperatura powietrza i widoczoscia.
+
+
+### 8.2. Analiza rozszerzona.
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE}
+koszalin_m %>% mutate(obs = log10(obs)) %>% 
+  GGally::ggpairs(columns = 2:ncol(.))+
+  ggtitle("Log10(obs)")
+#log10(obs) poprawia korelacje miedzy obs a wszystkimi predyktorami oprócz cisnienia atmosf.
+
+koszalin_m %>% mutate(obs = log10(obs),
+                  ws = log10(ws)) %>% 
+  GGally::ggpairs(columns = 2:ncol(.))+
+  ggtitle("log10(obs),log10(ws) ") #nie pomoglo
+
+koszalin_m %>% mutate(ws = log10(ws)) %>% 
+  GGally::ggpairs(columns = 2:ncol(.))+
+  ggtitle("log10(ws) ")#delikatnie poprawilo
+
+koszalin_m %>% mutate(obs = obs^2) %>% 
+  GGally::ggpairs(columns = 2:ncol(.))+
+  ggtitle("obs^2") #ws lepiej, reszta gorsza
+
+koszalin_m %>% mutate(ws = ws^2) %>% 
+  GGally::ggpairs(columns = 2:ncol(.))+
+  ggtitle("ws^2") #brak zmian
+
+koszalin_m %>% mutate(ws = ws^2,
+                  obs = obs^2) %>% 
+  GGally::ggpairs(columns = 2:ncol(.))+
+  ggtitle("ws^2, obs^2")
+#corelacja miedzy ws i obs lepiej 
+
+```
+
+Funkcja logarytmiczna polepsza korelacje miedzy zmiennymi, które nas interesuja. Funkcja kwadratowa raczej pogarsza.
+
+
+### 8.3. Opóźnienia.
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE}
+
+koszalin_m %>% gg_lag(geom = "point", lags = seq(2,12,2))
+
+
+```
+
+Najlepsza korelacja wystepuje na 12 opoznieniu. Tutaj ladnie widac sezonowosc cykliczna roczna naszych danych.
+
+<b>Autokorelacja</b>
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE}
+
+koszalin_m %>% 
+  ACF(obs, lag_max = 36) %>% 
+  autoplot()
+
+```
+
+Widac sezonowosc.
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE}
+
+koszalin_m %>% 
+  ACF(obs, lag_max = 120) %>% 
+  autoplot()
+
+```
+
+Widac sezonowosc i trend PM10.
+
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE}
+
+grid.arrange(koszalin_m %>% ACF(ws, lag_max = 120) %>% autoplot() + ggtitle("predkosc wiatru"),
+             koszalin_m %>% ACF(air_temp, lag_max = 120) %>% autoplot() + ggtitle("temeratura"),
+             koszalin_m %>% ACF(RH, lag_max = 120) %>% autoplot() + ggtitle("wilgotnosc"),
+             koszalin_m %>% ACF(atmos_pres, lag_max = 120) %>% autoplot() + ggtitle("cisnienie atmosferyczne"),
+             koszalin_m %>% ACF(visibility, lag_max = 120) %>% autoplot() + ggtitle("widocznosc"),
+             koszalin_m %>% ACF(dew_point, lag_max = 120) %>% autoplot() + ggtitle("punkt rosy"),
+             ncol = 2)
+```
+
+Temperatura , punkt rosy i widocznosc sa dobrymi predyktorami, poniewaz widac sezonowosc i malejacy trend.
+
+<b>Transformacje</b>
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE}
+
+l_m <- koszalin_m %>% 
+  features(obs, features = guerrero) %>% 
+  pull(lambda_guerrero)
+
+grid.arrange(koszalin_m %>% autoplot() + ggtitle("orginal + obs"),
+             koszalin_m %>% autoplot(box_cox(obs, l_m)) + ggtitle("boxcox + obs"))
+
+l_m <- koszalin_m %>% 
+  features(ws, features = guerrero) %>% 
+  pull(lambda_guerrero)
+
+grid.arrange(koszalin_m %>% autoplot(ws) + ggtitle("orginal + ws"),
+             koszalin_m %>% autoplot(box_cox(ws, l_m)) + ggtitle("boxcox + ws"))
+
+
+```
+
+Transformacja boxacoxa niewiele zmienia, nie otrzymalismy zwiekszonej jednorodnosci wariancji.
+
+## 9. Ustalenie zbiorów danych.
+
+Nasze dane treningowe sa w latach 2015-2018, natomiast dane testowe sa z 2018 roku.
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE}
+
+tran <- koszalin_m %>% filter(year(date) < 2018)
+test <- koszalin_m %>% filter(year(date) == 2018)
+
+```
+
+
+## 10. Modelowanie.
+
+### 10.1. Regresja liniowa prosta.
+```{r , echo=TRUE, message=FALSE, warning=FALSE}
+list(model1 = obs~ air_temp,
+     model2 = log10(obs)~ dew_point,
+     model3 = log10(obs)~ visibility,
+     model4 = log10(obs)~ air_temp,
+     model5 = log(obs)~ air_temp,
+     model6 = obs^2~ ws) -> formy 
+
+map(formy, as.formula) -> formy
+
+
+
+out <- map(.x = formy,
+           .f = ~model(tran, TSLM(formula = .x)) %>% glance()) %>%
+  do.call(rbind, .) %>% 
+  select(.model, adj_r_squared, CV, AIC, AICc, BIC)
+
+out %>% 
+  mutate(.model = formy) %>% 
+  arrange(AIC) %>% 
+  knitr::kable(digits = 2)
+
+```
+
+Najlepszym modelem jest model po transormacji logarytmicznej, gdzie predyktorem jest widocznosc. 
+
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE}
+
+fit1 <- tran %>% 
+  model(TSLM(formula = log10(obs) ~ visibility))
+
+fit2 <- tran %>% 
+  model(TSLM(formula = log10(obs) ~ dew_point))
+
+fit3 <- tran %>% 
+  model(TSLM(formula = log10(obs) ~ air_temp))
+
+
+
+```
+
+<b>Raport modelu f1: log10(obs) ~ visibility</b>
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE}
+
+
+fit1 %>% report()
+
+
+```
+
+<b>Raport modelu f2: log10(obs) ~ dew_point</b>
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE}
+
+fit2 %>% report()
+
+```
+
+<b>Raport modelu f3: log10(obs) ~ air_temp</b>
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE}
+
+fit3 %>% report()
+
+```
+
+Powyższe raporty modeli dostarczaja informacje, że we wszystkich modelach stala modelu i zmienna predykcyjna jest istotna statystycznie.
+
+<b>Podglad dopasowania modelu: log10(obs) ~ visibility</b>
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE}
+
+fit1 %>% 
+  augment() %>% 
+  ggplot(aes(x = date)) +
+  geom_line(aes(y = .fitted, color = "model")) +
+  geom_line(aes(y = obs, color = "dane")) +
+  labs(color = "Reprezentacja") -> p1;p1
+
+```
+
+Na wykresie widac, ze nasz model dobrze oddaje sezonowosc danych oryginalnych. Najwieksze bledy w dopasowaniu wystepuja w wartosciach ekstremalnych.
+ 
+<b>Podglad dopasowania modelu: log10(obs) ~ dew_point</b>
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE}
+
+fit2 %>% 
+  augment() %>% 
+  ggplot(aes(x = date)) +
+  geom_line(aes(y = .fitted, color = "model")) +
+  geom_line(aes(y = obs, color = "dane")) +
+  labs(color = "Reprezentacja") -> p2;p2
+
+```
+ 
+<b>Podglad dopasowania modelu: log10(obs) ~ air_temp</b>
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE}
+
+fit3 %>% 
+  augment() %>% 
+  ggplot(aes(x = date)) +
+  geom_line(aes(y = .fitted, color = "model")) +
+  geom_line(aes(y = obs, color = "dane")) +
+  labs(color = "Reprezentacja") -> p3;p3
+
+```
+
+<b> Reszty modelu log10(obs) ~ visibility </b> 
+ 
+```{r , echo=TRUE, message=FALSE, warning=FALSE}
+
+fit1 %>% gg_tsresiduals()  
+  
+```
+
+<b> Reszty modelu log10(obs) ~ dew_point </b> 
+ 
+```{r , echo=TRUE, message=FALSE, warning=FALSE}
+
+fit2 %>% gg_tsresiduals()  
+  
+```
+
+<b> Reszty modelu log10(obs) ~ air_temp </b> 
+ 
+```{r , echo=TRUE, message=FALSE, warning=FALSE}
+
+fit3 %>% gg_tsresiduals()  
+
+```
+
+We wszystkich modelach nie wystpuje autokorelacja reszt. Nie wystepuja problemy z jednorodnoscia wariancji. Rozklady reszt sa podobne do rozkladu normalnego.
+Najlepiej w dane oryginalne wpisuje sie model f1. 
+
+### 10.2. Regresja liniowa prosta z trendem i sezonnowoscia.
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE}
+
+list(model1 = obs ~ trend() + season(),
+     model2 = obs ~ air_temp + trend(),
+     model3 = obs ~ dew_point + trend(),
+     model4 = obs ~ visibility + trend(),
+     model5 = log(obs) ~ air_temp + trend(),
+     model6 = log10(obs) ~ air_temp + trend(),
+     model7 = obs^2 ~ ws + trend(),
+     model8 = obs ~ air_temp + trend() + season(),
+     model9 = obs ~ dew_point + trend() + season(),
+     model10 = obs ~ visibility + trend() + season(),
+     model11 = log(obs) ~ air_temp + trend() + season(),
+     model12 = log10(obs) ~ air_temp + trend() + season(),
+     model13 = obs^2 ~ ws + trend() + season(),
+     model14 = obs ~ air_temp + season(),
+     model15 = obs ~ dew_point + season(),
+     model16 = obs ~ visibility + season(),
+     model17 = log(obs) ~ air_temp + season(),
+     model18 = log10(obs) ~ air_temp + season(),
+     model19 = obs^2 ~ ws + season(),
+     model20 = log10(obs) ~ trend() + season(),
+     model21 = log10(obs) ~ visibility + trend() + season(),
+     model22 = log10(obs) ~ dew_point + trend() + season()) -> formy1
+
+map(formy1, as.formula) -> formy1
+
+out1 <- map(.x = formy1,
+           .f = ~model(tran, TSLM(formula = .x)) %>% glance()) %>%
+  do.call(rbind, .) %>% 
+  select(.model, adj_r_squared, CV, AIC, AICc, BIC)
+
+out1 %>% 
+  mutate(.model = formy1) %>% 
+  arrange(AIC) %>% 
+  knitr::kable(digits = 2)
+
+```
+
+Mamy 6 dobrych modeli. Wszystkie sa z funkcja log10(). Na trzecim miejscu jest model bez predykotra uwzgledniajacy tylko trend i sezonowosc. 
+
+
+<b> Analiza modelu: log10(obs) ~ visibility + trend() + season() </b> 
+ 
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+fit4 <- tran %>% 
+  model(TSLM(log10(obs) ~ visibility + trend() + season()))
+
+fit4 %>% report()
+
+```
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+fit4 %>% glance() %>% 
+  select(.model, adj_r_squared, CV, AIC, AICc, BIC) %>% 
+  knitr::kable(digits = 2)  
+
+```
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+fit4 %>% 
+  augment() %>% 
+  ggplot(aes(x = date)) +
+  geom_line(aes(y = .fitted, color = "model")) +
+  geom_line(aes(y = obs, color = "dane")) +
+  labs(color = "Reprezentacja") -> p4;p4
+
+```
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+fit4 %>% gg_tsresiduals()  
+
+
+```
+
+<b> Analiza modelu: log10(obs) ~ dew_point + trend() + season() </b> 
+ 
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+fit5 <- tran %>% 
+  model(TSLM(log10(obs) ~ dew_point + trend() + season()))
+
+fit5 %>% report()
+
+```
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+fit5 %>% glance() %>% 
+  select(.model, adj_r_squared, CV, AIC, AICc, BIC) %>% 
+  knitr::kable(digits = 2)  
+
+```
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+fit5 %>% 
+  augment() %>% 
+  ggplot(aes(x = date)) +
+  geom_line(aes(y = .fitted, color = "model")) +
+  geom_line(aes(y = obs, color = "dane")) +
+  labs(color = "Reprezentacja") -> p5;p5
+
+```
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+fit5 %>% gg_tsresiduals()  
+
+```
+
+<b> Analiza modelu: log10(obs) ~ trend() + season() </b> 
+ 
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+fit6 <- tran %>% 
+  model(TSLM(log10(obs) ~ trend() + season()))
+
+fit6 %>% report()
+
+```
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+fit6 %>% glance() %>% 
+  select(.model, adj_r_squared, CV, AIC, AICc, BIC) %>% 
+  knitr::kable(digits = 2)  
+
+```
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+fit6 %>% 
+  augment() %>% 
+  ggplot(aes(x = date)) +
+  geom_line(aes(y = .fitted, color = "model")) +
+  geom_line(aes(y = obs, color = "dane")) +
+  labs(color = "Reprezentacja") -> p6;p6
+
+```
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+fit6 %>% gg_tsresiduals()  
+
+```
+
+<b> Analiza modelu: log10(obs) ~ air_temp + trend() + season() </b> 
+ 
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+fit7 <- tran %>% 
+  model(TSLM(log10(obs) ~ air_temp + trend() + season()))
+
+fit7 %>% report()
+
+```
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+fit7 %>% glance() %>% 
+  select(.model, adj_r_squared, CV, AIC, AICc, BIC) %>% 
+  knitr::kable(digits = 2)  
+
+```
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+fit7 %>% 
+  augment() %>% 
+  ggplot(aes(x = date)) +
+  geom_line(aes(y = .fitted, color = "model")) +
+  geom_line(aes(y = obs, color = "dane")) +
+  labs(color = "Reprezentacja") -> p7;p7
+
+```
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+fit7 %>% gg_tsresiduals()  
+
+```
+
+
+W modelach gdzie zostay uzyte predyktory: visibility, dew point i air_temp dodawanie sezonowosci i trendu nie ma sensu, poniewaz po zbudowaniu modelu nie sa one istotne statystycznie. 
+Modele regresji liniowej prostej z sezonowoscia i trendem moja wyzszy wspolczynnik R kwadrat, lecz ich wada jest to, ze nie wszystkie zmienne uzyte do zbudowania modelu sa istotne statystycznie. 
+Najlepsze dopasowanie uzyskuja modele f4 i f5. Do prognozowania użyjemy modelu f4.
+
+
+### 10.3. Regresja wieloraka.
+
+#### 10.3.1. Budowania matrycy modeli przy użyciu niezmienionych danych oraz przy użyciu danych zlogarytmowanych. 
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+list(model1 = obs ~ air_temp + ws + atmos_pres + RH,
+     model2 = obs ~ dew_point + ws + atmos_pres + visibility,
+     model3 = obs ~ air_temp + ws + atmos_pres + RH + trend(),
+     model4 = obs ~ air_temp + ws + atmos_pres + RH + season(),
+     model5 = obs ~ air_temp + ws + atmos_pres + RH + trend() + season(),
+     model6 = log10(obs) ~ air_temp + ws + atmos_pres + RH,
+     model7 = log10(obs) ~ dew_point + ws + atmos_pres + visibility,
+     model8 = log10(obs) ~ air_temp + ws + atmos_pres + RH + trend(),
+     model9 = log10(obs) ~ air_temp + ws + atmos_pres + RH + season(),
+     model9 = log10(obs) ~ air_temp + ws + atmos_pres + RH + season() + trend()) -> formy2
+
+map(formy2, as.formula) -> formy2
+
+```
+
+#### 10.3.2. Ocena dopasowania .
+
+Tylko w jednym przypadku model oparty na niezmienionych danych uzyskal lepsze dopasowanie od modeli opartych na danych zlogarytmowanych.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+out2 <- map(.x = formy2,
+            .f = ~model(tran, TSLM(formula = .x)) %>% glance()) %>%
+  do.call(rbind, .) %>% 
+  select(.model, adj_r_squared, CV, AIC, AICc, BIC)
+
+out2 %>% 
+  mutate(.model = formy2) %>% 
+  arrange(AIC) %>% 
+  knitr::kable(digits = 2)
+
+```
+
+#### 10.3.3. Raport z najlepszego modelu.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+fit8 <- tran %>% 
+  model(TSLM(obs ~ air_temp + ws + atmos_pres + RH + trend() + season()))
+
+fit8 %>% report()
+
+```
+
+#### 10.3.4. Wykres dopasowania modelu.
+
+Różnice w dopasowaniu w miejscach wartosci ekstremalnych sa mniejsze niz w regresji liniowej.
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+fit8 %>% glance() %>% 
+  select(.model, adj_r_squared, CV, AIC, AICc, BIC) %>% 
+  knitr::kable(digits = 2)  
+
+fit8 %>% 
+  augment() %>% 
+  ggplot(aes(x = date)) +
+  geom_line(aes(y = .fitted, color = "model")) +
+  geom_line(aes(y = obs, color = "dane")) +
+  labs(color = "Reprezentacja") -> p8;p8
+```
+
+#### 10.3.5. Reszty.
+
+Wykres rozkladu nie przypomina wykresu rozkladu normalnego.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+fit8 %>% gg_tsresiduals()
+
+```
+
+#### 10.3.6. Budowanie modelu ze zlogarytmowanymi obserwacjami. 
+
+
+W przypadku modelu opartego na danych zlogarytmowanych  dopasowanie jest rownie dobre co w przypadku niezlogarytmowanych danych. 
+Wykres rozkladu jest zblizony do rozkadu normalnego.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+fit9 <- tran %>%
+  model(TSLM(log10(obs) ~ air_temp + ws + atmos_pres + RH + season() + trend()))
+
+fit9 %>% report()
+
+fit9 %>% glance() %>% 
+  select(.model, adj_r_squared, CV, AIC, AICc, BIC) %>% 
+  knitr::kable(digits = 2)  
+
+fit9 %>% 
+  augment() %>% 
+  ggplot(aes(x = date)) +
+  geom_line(aes(y = .fitted, color = "model")) +
+  geom_line(aes(y = obs, color = "dane")) +
+  labs(color = "Reprezentacja") -> p9;p9
+
+fit9 %>% gg_tsresiduals()
+```
+
+
+#### 10.3.7. Porowanie z poprzednimi najlepszymi modelami dopasowania.
+
+Roznice w dopasowaniu sa duze. Widac to szczególnie w styczniu 2017.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+gridExtra::grid.arrange(p1,p4,p8,p9)
+
+```
+
+#### 10.3.7. Podsumowanie.
+
+1. Modele oparte na danych zlogarytmowanych cechuja sie lepszym dopasowaniem.
+2. Analizujac wykres rozkladu modelu opartego na niezmienionych danych, ktory wstepnie uzyskal najlepszy wynik dopasowania, nie przypomina rozkadu normalnego. Natomiast wykres rozkladu jego odpowiednika na zlogarytmowanych danych wpisuje sie w rozklad normalny. 
+3. Najwieksze wyzwanie stanowi prognozowanie  wartosci ekstremalnych. W ich przypadku roznice pomiedzy wartosciami prognozowanymi i rzeczywistymi sa najwieksze.
+
+### 10.4. Model wykadniczy.
+
+#### 10.4.1. Raport.
+
+Wystepuje duza sezonowosc
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+fit_w <- tran %>% 
+  model(ETS(obs))
+
+fit_w %>% report()
+```
+
+#### 10.4.2. Ocena dopasowanie.
+
+Dopasowanie jest gorsze niz w przypadku wczesniejszych modeli
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+fit_w %>% glance() %>% 
+  knitr::kable(digits = 2)
+```
+
+#### 10.4.3. Wykres dopasowanie.
+
+Ponownie mozna zauwazyc ze wystepuje problem z dopasowaniem wartosci ekstremalnych.
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+fit_w %>% 
+  augment() %>% 
+  ggplot(aes(x = date)) +
+  geom_line(aes(y = .fitted, color = "model")) +
+  geom_line(aes(y = obs, color = "dane")) +
+  labs(color = "Reprezentacja") -> p6;p6
+```
+
+#### 10.4.4. Reszty.
+
+Pomimo gorszego dopasowanie wzgledem poprzednich modeli w tym przypadku tego modelu nie wystepuja problemy z wykresem reszt ani z rozkladem
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+fit_w %>% gg_tsresiduals(72)
+```
+
+#### 10.4.5. Komponenty.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+fit_w %>% 
+  components() %>% 
+  autoplot() +
+  ggtitle("ETS(M,N,M) components")
+
+```
+
+
+### 10.5. ARIMA.
+
+#### 10.5.1. Raport.
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE}
+
+fit_a <- tran %>% 
+  model(arima = ARIMA(obs, stepwise = F, approximation = F))
+
+fit_a %>% report()
+
+```
+
+#### 10.5.2. Ocena dopasownia.
+
+Slabe AIC i BIC.
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE}
+
+fit_a %>% glance() %>% 
+  knitr::kable(digits = 2)
+
+```
+
+#### 10.5.3. Wykres dopasowania.
+
+W przypadku tego modelu sytuacja z prognozowaniem wartosci ekstemalnych jest identyczna jak w przypadku wczesniejszych modeli.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+fit_a %>% 
+  augment() %>% 
+  ggplot(aes(x = date)) +
+  geom_line(aes(y = .fitted, color = "model")) +
+  geom_line(aes(y = obs, color = "dane")) +
+  labs(color = "Reprezentacja") -> p_a;p_a
+
+```
+
+#### 10.5.4. Reszty.
+
+Analizujac wykres reszt mozna stwierdzic ze model bedzie porognozowal bez wiekszych zastrzezen
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+fit_a %>% gg_tsresiduals(72)
+
+```
+
+
+### 10.6. Modele dynamiczne.
+
+#### 10.6.1. Matryca modeli.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+list(model1 = log10(obs) ~ ws,
+     model2 = log10(obs) ~ ws + RH,
+     model3 = log10(obs) ~ ws + I(ws^2),
+     model4 = log10(obs) ~ ws + atmos_pres,
+     model5 = log10(obs) ~ ws + atmos_pres + RH,
+     model6 = log10(obs) ~ ws + I(ws^2) + atmos_pres + RH,
+     model7 = log10(obs) ~ air_temp + ws + atmos_pres + RH,
+     model8 = log10(obs) ~ ws + dew_point + atmos_pres,
+     model9 = obs ~ air_temp + ws + atmos_pres + RH,
+     model10 = obs ~ dew_point + atmos_pres + ws) -> formy_dyn
+
+map(formy_dyn, as.formula) -> formy_dyn
+
+```
+
+#### 10.6.2. Budowa modeli i ocena dopasowania.
+
+Dopasowanie w przypadku modeli dynamicznych jest bardzo slabe 
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+out_dyn <- map(.x = formy_dyn,
+               .f = ~model(tran, ARIMA(formula = .x))
+               %>% glance()) %>% 
+  do.call(rbind, .) %>% 
+  select(.model, AIC, AICc, BIC)
+
+out_dyn %>% 
+  mutate(.model = formy_dyn) %>% 
+  arrange(AIC) %>% 
+  knitr::kable(digits = 2)
+
+```
+
+#### 10.6.3. Raport.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+fit_d <- tran %>% 
+  model(arima = ARIMA(log10(obs) ~ air_temp + ws + atmos_pres , stepwise = F, approximation = F))
+
+fit_d %>% report()
+
+```
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+fit_d %>% glance() %>% 
+  knitr::kable(digits = 2)
+
+```
+
+#### 10.6.4. Wykres dopasowania.
+
+Niezmiennie pojawia sie problem z prognoza wartosci ekstremalnych.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+fit_d %>% 
+  augment() %>% 
+  ggplot(aes(x = date)) +
+  geom_line(aes(y = .fitted, color = "model")) +
+  geom_line(aes(y = obs, color = "dane")) +
+  labs(color = "Reprezentacja") -> p_d;p_d
+
+```
+
+
+
+## 11. Prognozowanie.
+
+### 11.1. Model regresji liniowej prostej.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, , echo=TRUE}
+
+fc_1 <- forecast(fit1, test)
+
+fc_1 %>% 
+  autoplot(koszalin_m %>% filter(year(date) > 2010), level = 95) + xlab("Year") +
+  scale_color_brewer(type = "qual", palette = "Dark2")->p_1;p_1
+
+```
+
+### 11.2.  Modele regresji liniowej prostej z trendem i sezonowoscia.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, , echo=TRUE}
+
+fc_4 <- forecast(fit4, test)
+
+fc_4 %>% 
+  autoplot(koszalin_m %>% filter(year(date) > 2010), level = 95) + xlab("Year") +
+  scale_color_brewer(type = "qual", palette = "Dark2")->p_4;p_4
+
+```
+
+
+
+### 11.3. Model wieloraki.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, , echo=TRUE}
+
+fc_wielo <- forecast(fit8,test)
+
+fc_wielo %>% 
+  autoplot(koszalin_m %>% filter(year(date) > 2010), level = 95) + xlab("Year") +
+  scale_color_brewer(type = "qual", palette = "Dark2") -> p_wielo ; p_wielo
+
+```
+
+
+### 11.4. Model wykladniczy.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, , echo=TRUE}
+
+fc_w <- fit_w %>% forecast(h = "12 months")
+
+fc_w %>% 
+  autoplot(koszalin_m %>% filter(year(date) > 2010), level = 95) + xlab("Year") +
+  scale_color_brewer(type = "qual", palette = "Dark2")->p_w; p_w
+
+```
+
+
+### 11.5. Model ARIMA.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, , echo=TRUE}
+
+fc_a <- fit_a %>% forecast(h = "12 months")
+
+fc_a %>% 
+  autoplot(koszalin_m %>% filter(year(date) > 2010), level = 95) + xlab("Year") +
+  scale_color_brewer(type = "qual", palette = "Dark2")->p_a;p_a
+
+```
+
+### 11.6. Model dynamiczny.
+
+```{r eval=TRUE, message=FALSE, warning=FALSE}
+
+fc_d <- forecast(fit_d,test)
+
+fc_d %>% 
+  autoplot(koszalin_m %>% filter(year(date) > 2010), level = 95) + xlab("Year") +
+  scale_color_brewer(type = "qual", palette = "Dark2") -> p_d ; p_d
+
+```
+
+### 11.7. Porównanie wszystkich prognoz.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, , echo=TRUE}
+
+grid.arrange( p_1 + ggtitle('Regresja liniowa prosta'),
+              p_4 + ggtitle('Regresja liniowa z trendem i sezonowoscia'),
+              p_wielo + ggtitle('ETS'))
+
+```
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, , echo=TRUE}
+
+grid.arrange( p_w + ggtitle('Model wykladniczy'),
+              p_a + ggtitle('ARIMA'),
+              p_d + ggtitle('Model dynamiczny'))
+
+```
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, , echo=TRUE}
+
+bind_rows(
+  fit1%>%accuracy(),
+  fit4%>%accuracy(),
+  fit8%>%accuracy(),
+  fit_w%>%accuracy(),
+  fit_a%>%accuracy(),
+  fit_d%>%accuracy(),
+  fc_1%>%accuracy(test),
+  fc_4%>%accuracy(test),
+  fc_wielo%>%accuracy(test),
+  fc_w%>%accuracy(test),
+  fc_a%>%accuracy(test),
+  fc_d%>%accuracy(test))->dopasowanie
+knitr::kable(dopasowanie, digits = 2 )
+
+```
+
+### 11.8. Podsumowanie prognoz.
+
+Model regresji wielorakiej bardzo dobrze wpasowuje sie w dane treningowe jednak ma bardzo slabe wyniki przy prognozowaniu. 
+Bardzo dobre parametry przy danych treningowych i najlepsze podczas testowania otrzymal model regresji liniowej uwzgledniajacy trend i sezonowosc.
+Zatem do prognozowania na naszym zbiorze danych najlepiej nadaje sie model: <b> TSLM(log10(obs) ~ visibility + trend() + season())	 </b>
